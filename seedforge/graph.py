@@ -1,4 +1,4 @@
-"""Граф зависимостей таблиц + topological sort для определения порядка вставки."""
+"""FK dependency graph and insertion order resolution."""
 
 from collections import defaultdict
 from seedforge.introspector import TableInfo
@@ -11,26 +11,23 @@ class DependencyGraph:
         self._build()
 
     def _build(self):
-        """Построить граф зависимостей из FK."""
+        """Build dependency graph from FK relationships."""
         for table_name, table in self.tables.items():
             for col in table.columns:
                 if col.fk_table and col.fk_table in self.tables and col.fk_table != table_name:
-                    # table зависит от fk_table (fk_table должна быть заполнена первой)
+                    # table depends on fk_table
                     self.edges[table_name].add(col.fk_table)
 
     def topological_sort(self) -> list[str]:
-        """Topological sort — возвращает порядок вставки (родители первые).
-
-        Использует алгоритм Кана (BFS) для обработки циклов.
-        """
-        # Подсчёт входящих рёбер
+        """Returns insertion order (parents first). Uses Kahn's algorithm."""
+        # Count in-degrees
         in_degree: dict[str, int] = {name: 0 for name in self.tables}
         for table_name, parents in self.edges.items():
             in_degree[table_name] = len(parents)
 
-        # Таблицы без зависимостей — начальная очередь
+        # Start with tables that have no dependencies
         queue = [name for name, degree in in_degree.items() if degree == 0]
-        queue.sort()  # детерминированный порядок
+        queue.sort()  # deterministic order
 
         result = []
         visited = set()
@@ -40,7 +37,7 @@ class DependencyGraph:
             result.append(current)
             visited.add(current)
 
-            # Уменьшаем in_degree для зависимых таблиц
+            # Decrease in-degree for dependent tables
             for table_name, parents in self.edges.items():
                 if current in parents and table_name not in visited:
                     in_degree[table_name] -= 1
@@ -48,7 +45,7 @@ class DependencyGraph:
                         queue.append(table_name)
                         queue.sort()
 
-        # Циклические зависимости — добавляем оставшиеся
+        # Handle cycles — append remaining tables
         remaining = [name for name in self.tables if name not in visited]
         remaining.sort()
         result.extend(remaining)
@@ -56,5 +53,5 @@ class DependencyGraph:
         return result
 
     def get_parents(self, table_name: str) -> set[str]:
-        """Получить родительские таблицы (от которых зависит)."""
+        """Get parent tables that this table depends on."""
         return self.edges.get(table_name, set())

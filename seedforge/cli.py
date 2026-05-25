@@ -1,4 +1,4 @@
-"""CLI-интерфейс SeedForge."""
+"""Command-line interface."""
 
 import typer
 from rich.console import Console
@@ -9,14 +9,14 @@ from typing import Optional
 from pathlib import Path
 
 from seedforge.config import Config, DEFAULT_CONFIG_FILE
-from seedforge.introspector import Introspector
+from seedforge.introspector import create_introspector
 from seedforge.graph import DependencyGraph
 from seedforge.generators import DataGenerator
 from seedforge.inserter import BatchInserter
 
 app = typer.Typer(
     name="seedforge",
-    help="AI-powered test data generator. Reads your DB schema, generates realistic FK-valid data.",
+    help="One command to fill your database with realistic test data.",
     no_args_is_help=True,
 )
 console = Console()
@@ -31,7 +31,7 @@ def connect(
     console.print(f"\n[bold blue]Connecting to database...[/bold blue]")
 
     try:
-        introspector = Introspector(db_url)
+        introspector = create_introspector(db_url)
         info = introspector.get_db_info()
         introspector.close()
 
@@ -58,7 +58,7 @@ def inspect(
     """Inspect database schema: tables, columns, foreign keys."""
     db_url = _resolve_db_url(db_url)
 
-    introspector = Introspector(db_url)
+    introspector = create_introspector(db_url)
     tables = introspector.get_tables(schema)
     introspector.close()
 
@@ -66,7 +66,7 @@ def inspect(
         console.print("[yellow]No tables found.[/yellow]")
         raise typer.Exit(0)
 
-    # Граф зависимостей + порядок вставки
+    # Dependency graph + insertion order
     graph = DependencyGraph(tables)
     order = graph.topological_sort()
 
@@ -88,7 +88,7 @@ def inspect(
         console.print(t)
         console.print()
 
-    # Статистика
+    # Stats
     total_cols = sum(len(t.columns) for t in tables.values())
     total_fks = sum(1 for t in tables.values() for c in t.columns if c.fk_table)
     console.print(f"[dim]Total: {len(tables)} tables, {total_cols} columns, {total_fks} foreign keys[/dim]\n")
@@ -109,7 +109,7 @@ def generate(
     db_url = _resolve_db_url(db_url)
 
     with console.status("[bold blue]Reading schema...[/bold blue]"):
-        introspector = Introspector(db_url)
+        introspector = create_introspector(db_url)
         all_tables = introspector.get_tables(schema)
 
     if not all_tables:
@@ -117,7 +117,7 @@ def generate(
         introspector.close()
         raise typer.Exit(0)
 
-    # Фильтр таблиц
+    # Filter tables
     if tables:
         table_list = [t.strip() for t in tables.split(",")]
         filtered = {k: v for k, v in all_tables.items() if k in table_list}
@@ -125,14 +125,14 @@ def generate(
             console.print(f"[red]Tables not found: {tables}[/red]")
             introspector.close()
             raise typer.Exit(1)
-        # Добавляем родительские таблицы (для FK)
+        # Include FK parent tables
         for tbl in list(filtered.values()):
             for col in tbl.columns:
                 if col.fk_table and col.fk_table in all_tables and col.fk_table not in filtered:
                     filtered[col.fk_table] = all_tables[col.fk_table]
         all_tables = filtered
 
-    # Порядок вставки
+    # Insertion order
     graph = DependencyGraph(all_tables)
     order = graph.topological_sort()
 
@@ -141,7 +141,7 @@ def generate(
         console.print(f"[dim]Seed: {seed}[/dim]")
     console.print()
 
-    # Генерация данных
+    # Generate data
     generator = DataGenerator(seed=seed)
     generated_data = {}
 
@@ -152,14 +152,15 @@ def generate(
             generated_data[table_name] = data
         console.print(f"  [green]✓[/green] {table_name}: {len(data)} rows")
 
-    # Экспорт или вставка
+    # Export or insert
     if export:
         _export_data(export, generated_data, all_tables, order)
     elif dry_run:
         console.print(f"\n[yellow]Dry run — no data inserted.[/yellow]")
         _show_preview(generated_data, order)
     else:
-        inserter = BatchInserter(introspector.connection)
+        engine = introspector.get_db_info().get("engine", "PostgreSQL")
+        inserter = BatchInserter(introspector.connection, engine=engine)
         if clean:
             with console.status("[yellow]Cleaning tables...[/yellow]"):
                 inserter.truncate_tables(order)
@@ -173,6 +174,79 @@ def generate(
 
 
 @app.command()
+def ai_generate(
+    db_url: Optional[str] = typer.Argument(None, help="Database connection string"),
+    rows: int = typer.Option(20, "--rows", "-r", help="Rows per table (max 50 for AI)"),
+    schema: str = typer.Option("public", help="Database schema"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", help="API key (auto-detects provider by prefix)"),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="AI provider: anthropic, openai, gemini, groq"),
+    export: Optional[str] = typer.Option(None, "--export", "-e", help="Export to file (sql/json)"),
+):
+    """Generate data using AI for maximum realism.
+
+    Supports: Anthropic, OpenAI, Gemini, Groq.
+    Auto-detects provider by API key prefix or env variable.
+    """
+    from seedforge.ai import generate_with_ai, detect_provider, list_providers
+
+    ai = detect_provider(api_key, provider)
+    if not ai:
+        console.print("[red]No AI provider found.[/red]\n")
+        console.print("Set one of these environment variables:")
+        for p in list_providers():
+            status = "[green]✓[/green]" if p["available"] else "[dim]–[/dim]"
+            console.print(f"  {status} {p['env']:25s} {p['display']}")
+        console.print(f"\nOr pass --api-key directly.")
+        raise typer.Exit(1)
+
+    console.print(f"[dim]Provider: {ai.name}[/dim]")
+
+    db_url = _resolve_db_url(db_url)
+    rows = min(rows, 50)
+
+    with console.status("[bold blue]Reading schema...[/bold blue]"):
+        introspector = create_introspector(db_url)
+        all_tables = introspector.get_tables(schema)
+
+    if not all_tables:
+        console.print("[yellow]No tables found.[/yellow]")
+        introspector.close()
+        raise typer.Exit(0)
+
+    from seedforge.graph import DependencyGraph
+    graph = DependencyGraph(all_tables)
+    order = graph.topological_sort()
+
+    console.print(f"\n[bold]AI generating {rows} rows for {len(order)} tables[/bold]\n")
+
+    generated_data = {}
+    for table_name in order:
+        table = all_tables[table_name]
+        columns = [
+            {"name": c.name, "type": c.data_type, "nullable": c.nullable}
+            for c in table.columns
+            if not (c.is_primary and c.is_serial)
+        ]
+
+        with console.status(f"[blue]AI generating {table_name}...[/blue]"):
+            data = generate_with_ai(table_name, columns, rows, ai_provider=ai)
+
+        if data:
+            generated_data[table_name] = data
+            console.print(f"  [green]✓[/green] {table_name}: {len(data)} rows (AI)")
+        else:
+            console.print(f"  [yellow]⚠[/yellow] {table_name}: AI failed, skipping")
+
+    if export:
+        _export_data(export, generated_data, all_tables, order)
+    else:
+        console.print(f"\n[bold green]Done![/bold green] Generated {sum(len(d) for d in generated_data.values())} rows.")
+        _show_preview(generated_data, order)
+
+    introspector.close()
+
+
+@app.command()
 def version():
     """Show SeedForge version."""
     from seedforge import __version__
@@ -180,7 +254,7 @@ def version():
 
 
 def _resolve_db_url(db_url: Optional[str]) -> str:
-    """Получить DB URL из аргумента или конфига."""
+    """Get DB URL from argument or config."""
     if db_url:
         return db_url
     config = Config.load()
@@ -191,7 +265,7 @@ def _resolve_db_url(db_url: Optional[str]) -> str:
 
 
 def _export_data(format: str, data: dict, tables: dict, order: list):
-    """Экспорт данных в файл."""
+    """Export data to file."""
     if format == "sql":
         from seedforge.inserter import BatchInserter
         sql = BatchInserter.generate_sql(data, tables, order)
@@ -201,7 +275,7 @@ def _export_data(format: str, data: dict, tables: dict, order: list):
     elif format == "json":
         import json
         output_file = "seedforge_export.json"
-        # Конвертируем в JSON-сериализуемый формат
+        # Convert to JSON-serializable format
         serializable = {}
         for table_name in order:
             serializable[table_name] = [
@@ -215,7 +289,7 @@ def _export_data(format: str, data: dict, tables: dict, order: list):
 
 
 def _json_safe(value):
-    """Конвертировать значение в JSON-безопасный тип."""
+    """Convert value to JSON-safe type."""
     import datetime
     import decimal
     import uuid
@@ -229,7 +303,7 @@ def _json_safe(value):
 
 
 def _show_preview(data: dict, order: list):
-    """Показать превью данных."""
+    """Show data preview."""
     for table_name in order:
         rows = data[table_name]
         if not rows:

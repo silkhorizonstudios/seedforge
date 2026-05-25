@@ -1,4 +1,4 @@
-"""Конфигурация SeedForge (.seedforge.yaml)."""
+"""Configuration file handling (.seedforge.yaml)."""
 
 import yaml
 from pathlib import Path
@@ -14,13 +14,13 @@ class Config:
     default_schema: str = "public"
     seed: int | None = None
     exclude_tables: list[str] = field(default_factory=list)
-    # Кастомные генераторы для колонок
-    # Формат: {"table.column": {"type": "faker_method", "args": {...}}}
+    # Custom column generators
+    # Format: {"table.column": {"type": "faker_method", "args": {...}}}
     custom_generators: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str = DEFAULT_CONFIG_FILE) -> "Config":
-        """Загрузить конфиг из файла."""
+        """Load config from file."""
         config_path = Path(path)
         if not config_path.exists():
             return cls()
@@ -36,7 +36,7 @@ class Config:
         )
 
     def save(self, path: str = DEFAULT_CONFIG_FILE):
-        """Сохранить конфиг в файл."""
+        """Save config to file."""
         data = {
             "db_url": self.db_url,
             "default_rows": self.default_rows,

@@ -1,3 +1,3 @@
-"""SeedForge - AI-powered test data generator for databases."""
+"""SeedForge - one command to fill your database with realistic test data."""
 
-__version__ = "0.1.0"
+__version__ = "0.3.3"
