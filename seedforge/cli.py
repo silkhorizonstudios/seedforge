@@ -52,8 +52,8 @@ def connect(
 
 @app.command()
 def inspect(
-    db_url: Optional[str] = typer.Argument(None, help="PostgreSQL connection string"),
-    schema: str = typer.Option("public", help="Database schema to inspect"),
+    db_url: Optional[str] = typer.Argument(None, help="Database connection string"),
+    schema: str = typer.Option("", help="Database schema (default: auto-detect)"),
 ):
     """Inspect database schema: tables, columns, foreign keys."""
     db_url = _resolve_db_url(db_url)
@@ -96,9 +96,9 @@ def inspect(
 
 @app.command()
 def generate(
-    db_url: Optional[str] = typer.Argument(None, help="PostgreSQL connection string"),
+    db_url: Optional[str] = typer.Argument(None, help="Database connection string"),
     rows: int = typer.Option(100, "--rows", "-r", help="Rows per table"),
-    schema: str = typer.Option("public", help="Database schema"),
+    schema: str = typer.Option("", help="Database schema (default: auto-detect)"),
     seed: Optional[int] = typer.Option(None, "--seed", "-s", help="Random seed for deterministic generation"),
     export: Optional[str] = typer.Option(None, "--export", "-e", help="Export to file (sql/json) instead of inserting"),
     tables: Optional[str] = typer.Option(None, "--tables", "-t", help="Comma-separated list of tables to fill"),
