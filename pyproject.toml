@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seedforge"
+version = "0.1.0"
+description = "AI-powered test data generator that reads your database schema and fills it with realistic, FK-valid data in seconds"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "SilkHorizon", email = "hello@silkhorizon.uz"},
+]
+keywords = ["database", "testing", "faker", "seed", "synthetic-data", "postgresql"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "typer>=0.12.0",
+    "rich>=13.0.0",
+    "psycopg2-binary>=2.9.0",
+    "faker>=25.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+seedforge = "seedforge.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/silkhorizon/seedforge"
+Documentation = "https://seedforge.dev"
+Repository = "https://github.com/silkhorizon/seedforge"
+
+[tool.setuptools.packages.find]
+include = ["seedforge*"]
