@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "seedforge"
-version = "0.3.3"
+version = "0.4.0"
 description = "One command to fill your database with realistic test data. Reads schema, resolves FK, generates smart data — no code needed."
 readme = "README.md"
 license = {text = "MIT"}
@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 authors = [
     {name = "SilkHorizon", email = "hello@silkhorizon.uz"},
 ]
-keywords = ["database", "testing", "faker", "seed", "synthetic-data", "postgresql"]
+keywords = ["database", "testing", "faker", "seed", "synthetic-data", "postgresql", "mysql", "sqlite", "test-data", "seeding"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
