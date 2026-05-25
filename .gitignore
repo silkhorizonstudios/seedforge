@@ -13,3 +13,4 @@ env/
 seedforge_export.*
 *.db
 .DS_Store
+heap_profiler/
