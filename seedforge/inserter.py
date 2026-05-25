@@ -16,7 +16,13 @@ class BatchInserter:
         self.engine = engine.lower()
         self._is_mysql = self.engine in ("mysql", "mariadb")
         self._is_sqlite = self.engine == "sqlite"
-        self._q = "`" if self._is_mysql else '"'
+        self._is_mssql = self.engine == "mssql"
+        if self._is_mssql:
+            self._q = lambda n: f"[{n}]"
+        elif self._is_mysql:
+            self._q = lambda n: f"`{n}`"
+        else:
+            self._q = lambda n: f'"{n}"'
 
     def insert_all(
         self,
@@ -52,7 +58,7 @@ class BatchInserter:
                                     )
 
                 columns = list(rows[0].keys())
-                col_list = ", ".join(f'{q}{c}{q}' for c in columns)
+                col_list = ", ".join(q(c) for c in columns)
                 placeholders = ", ".join(["%s"] * len(columns))
 
                 for i in range(0, len(rows), self.BATCH_SIZE):
@@ -64,15 +70,15 @@ class BatchInserter:
 
                     if self._is_sqlite:
                         ph = ", ".join(["?"] * len(columns))
-                        sql = f'INSERT OR IGNORE INTO {q}{table_name}{q} ({col_list}) VALUES ({ph})'
+                        sql = f'INSERT OR IGNORE INTO {q(table_name)} ({col_list}) VALUES ({ph})'
                         cur.executemany(sql, values)
                     elif self._is_mysql:
-                        sql = f'INSERT IGNORE INTO {q}{table_name}{q} ({col_list}) VALUES ({placeholders})'
+                        sql = f'INSERT IGNORE INTO {q(table_name)} ({col_list}) VALUES ({placeholders})'
                         cur.executemany(sql, values)
                     else:
                         from psycopg2.extras import execute_values
                         template = "(" + ", ".join(["%s"] * len(columns)) + ")"
-                        sql = f'INSERT INTO {q}{table_name}{q} ({col_list}) VALUES %s ON CONFLICT DO NOTHING'
+                        sql = f'INSERT INTO {q(table_name)} ({col_list}) VALUES %s ON CONFLICT DO NOTHING'
                         execute_values(cur, sql, values, template=template)
 
                 # After insert, refresh data with actual PKs from DB for FK resolution
@@ -81,7 +87,7 @@ class BatchInserter:
                     pk_cols = [c for c in table.columns if c.is_primary]
                     if pk_cols:
                         pk_name = pk_cols[0].name
-                        cur.execute(f'SELECT {q}{pk_name}{q} FROM {q}{table_name}{q}')
+                        cur.execute(f'SELECT {q(pk_name)} FROM {q(table_name)}')
                         real_ids = [row[0] for row in cur.fetchall()]
                         if real_ids:
                             data[table_name] = [{pk_name: rid} for rid in real_ids]
@@ -102,23 +108,28 @@ class BatchInserter:
         q = self._q
         cur = self.connection.cursor()
         columns = list(rows[0].keys())
-        col_list = ", ".join(f'{q}{c}{q}' for c in columns)
+        col_list = ", ".join(q(c) for c in columns)
         placeholders = ", ".join(["%s"] * len(columns))
 
-        # Set serial sequence
+        # Set serial sequence / identity insert
         table = tables.get(table_name)
-        if table and not self._is_sqlite and not self._is_mysql:
-            for col in table.columns:
-                if col.is_primary and col.is_serial:
-                    max_id = max((r.get(col.name, 0) for r in rows), default=0)
-                    if isinstance(max_id, int) and max_id > 0:
-                        try:
-                            cur.execute(
-                                f"SELECT setval(pg_get_serial_sequence('{table_name}', '{col.name}'), %s, true)",
-                                (max_id,)
-                            )
-                        except Exception:
-                            pass
+        has_identity = False
+        if table:
+            has_identity = any(c.is_primary and c.is_serial for c in table.columns)
+            if has_identity and self._is_mssql:
+                cur.execute(f"SET IDENTITY_INSERT {q(table_name)} ON")
+            elif has_identity and not self._is_sqlite and not self._is_mysql and not self._is_mssql:
+                for col in table.columns:
+                    if col.is_primary and col.is_serial:
+                        max_id = max((r.get(col.name, 0) for r in rows), default=0)
+                        if isinstance(max_id, int) and max_id > 0:
+                            try:
+                                cur.execute(
+                                    f"SELECT setval(pg_get_serial_sequence('{table_name}', '{col.name}'), %s, true)",
+                                    (max_id,)
+                                )
+                            except Exception:
+                                pass
 
         for i in range(0, len(rows), self.BATCH_SIZE):
             batch = rows[i:i + self.BATCH_SIZE]
@@ -128,13 +139,18 @@ class BatchInserter:
             ]
             if self._is_sqlite:
                 ph = ", ".join(["?"] * len(columns))
-                cur.executemany(f'INSERT OR IGNORE INTO {q}{table_name}{q} ({col_list}) VALUES ({ph})', values)
+                cur.executemany(f'INSERT OR IGNORE INTO {q(table_name)} ({col_list}) VALUES ({ph})', values)
             elif self._is_mysql:
-                cur.executemany(f'INSERT IGNORE INTO {q}{table_name}{q} ({col_list}) VALUES ({placeholders})', values)
+                cur.executemany(f'INSERT IGNORE INTO {q(table_name)} ({col_list}) VALUES ({placeholders})', values)
+            elif self._is_mssql:
+                cur.executemany(f'INSERT INTO {q(table_name)} ({col_list}) VALUES ({placeholders})', values)
             else:
                 from psycopg2.extras import execute_values
                 template = "(" + ", ".join(["%s"] * len(columns)) + ")"
-                execute_values(cur, f'INSERT INTO {q}{table_name}{q} ({col_list}) VALUES %s ON CONFLICT DO NOTHING', values, template=template)
+                execute_values(cur, f'INSERT INTO {q(table_name)} ({col_list}) VALUES %s ON CONFLICT DO NOTHING', values, template=template)
+
+        if has_identity and self._is_mssql:
+            cur.execute(f"SET IDENTITY_INSERT {q(table_name)} OFF")
 
         cur.close()
 
@@ -142,17 +158,17 @@ class BatchInserter:
         """Truncate tables in reverse order (children first)."""
         q = self._q
         cur = self.connection.cursor()
-        if self._is_sqlite:
+        if self._is_sqlite or self._is_mssql:
             for table_name in reversed(order):
-                cur.execute(f'DELETE FROM {q}{table_name}{q}')
+                cur.execute(f'DELETE FROM {q(table_name)}')
         elif self._is_mysql:
             cur.execute("SET FOREIGN_KEY_CHECKS = 0")
             for table_name in reversed(order):
-                cur.execute(f'TRUNCATE TABLE {q}{table_name}{q}')
+                cur.execute(f'TRUNCATE TABLE {q(table_name)}')
             cur.execute("SET FOREIGN_KEY_CHECKS = 1")
         else:
             for table_name in reversed(order):
-                cur.execute(f'TRUNCATE TABLE {q}{table_name}{q} CASCADE')
+                cur.execute(f'TRUNCATE TABLE {q(table_name)} CASCADE')
         cur.close()
 
     @staticmethod
@@ -164,7 +180,13 @@ class BatchInserter:
     ) -> str:
         """Generate SQL file with INSERT statements."""
         is_mysql = engine.lower() in ("mysql", "mariadb")
-        q = "`" if is_mysql else '"'
+        is_mssql = engine.lower() == "mssql"
+        if is_mssql:
+            q = lambda n: f"[{n}]"
+        elif is_mysql:
+            q = lambda n: f"`{n}`"
+        else:
+            q = lambda n: f'"{n}"'
 
         lines = ["-- Generated by SeedForge", "-- https://github.com/silkhorizonstudios/seedforge", ""]
         if is_mysql:
@@ -178,7 +200,7 @@ class BatchInserter:
                 continue
 
             columns = list(rows[0].keys())
-            col_list = ", ".join(f'{q}{c}{q}' for c in columns)
+            col_list = ", ".join(q(c) for c in columns)
 
             lines.append(f"-- {table_name} ({len(rows)} rows)")
 
@@ -186,7 +208,7 @@ class BatchInserter:
                 values = ", ".join(
                     BatchInserter._sql_value(row.get(c)) for c in columns
                 )
-                lines.append(f'INSERT INTO {q}{table_name}{q} ({col_list}) VALUES ({values});')
+                lines.append(f'INSERT INTO {q(table_name)} ({col_list}) VALUES ({values});')
 
             lines.append("")
 
@@ -196,8 +218,7 @@ class BatchInserter:
         lines.append("")
         return "\n".join(lines)
 
-    @staticmethod
-    def _prep_value(value):
+    def _prep_value(self, value):
         """Prepare value for the DB driver."""
         if value is None:
             return None
@@ -205,6 +226,11 @@ class BatchInserter:
             return json.dumps(value)
         if isinstance(value, decimal.Decimal):
             return float(value)
+        if self._is_mssql or self._is_sqlite:
+            if isinstance(value, bool):
+                return 1 if value else 0
+            if isinstance(value, (datetime.datetime, datetime.date)):
+                return value.isoformat()
         return value
 
     @staticmethod

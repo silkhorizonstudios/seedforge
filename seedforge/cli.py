@@ -183,7 +183,7 @@ def generate(
                         pk_name = pk_cols[0].name
                         q = inserter._q
                         cur = introspector.connection.cursor()
-                        cur.execute(f'SELECT {q}{pk_name}{q} FROM {q}{table_name}{q}')
+                        cur.execute(f'SELECT {q(pk_name)} FROM {q(table_name)}')
                         real_ids = [row[0] for row in cur.fetchall()]
                         cur.close()
                         if real_ids:

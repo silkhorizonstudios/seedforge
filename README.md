@@ -119,9 +119,10 @@ Migration tables (`_prisma_migrations`, `django_migrations`, `alembic_version`, 
 
 ## Databases
 
-- PostgreSQL
+- PostgreSQL (+ CockroachDB)
 - MySQL / MariaDB
 - SQLite
+- Microsoft SQL Server
 
 ## Contributing
 

@@ -54,8 +54,10 @@ def create_introspector(db_url: str) -> "Introspector":
         return MySQLIntrospector(db_url)
     elif scheme in ("sqlite", "sqlite3"):
         return SQLiteIntrospector(db_url)
+    elif scheme in ("mssql", "sqlserver", "mssql+pymssql"):
+        return MSSQLIntrospector(db_url)
     else:
-        raise ValueError(f"Unsupported database: {scheme}. Supported: postgresql/psql/pg, mysql/mariadb, sqlite")
+        raise ValueError(f"Unsupported database: {scheme}. Supported: postgresql, mysql/mariadb, sqlite, mssql")
 
 
 class Introspector:
@@ -405,6 +407,119 @@ class SQLiteIntrospector(Introspector):
                         for col in tables[table_name].columns:
                             if col.name == info_row[2]:
                                 col.is_unique = True
+
+        cur.close()
+        return tables
+
+
+class MSSQLIntrospector(Introspector):
+    def __init__(self, db_url: str):
+        super().__init__(db_url)
+        import pymssql
+        parsed = urlparse(db_url)
+        self.db_name = parsed.path.lstrip("/")
+        self.connection = pymssql.connect(
+            server=parsed.hostname or "localhost",
+            port=parsed.port or 1433,
+            user=parsed.username or "sa",
+            password=parsed.password or "",
+            database=self.db_name,
+        )
+
+    def get_db_info(self) -> dict:
+        cur = self.connection.cursor()
+        cur.execute("SELECT DB_NAME(), @@SERVERNAME, @@VERSION")
+        db, host, version = cur.fetchone()
+        cur.execute(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_SCHEMA = 'dbo'"
+        )
+        count = cur.fetchone()[0]
+        cur.close()
+        return {
+            "database": db,
+            "host": host or "localhost",
+            "version": version.split("\n")[0] if version else "unknown",
+            "table_count": count,
+            "engine": "MSSQL",
+        }
+
+    def get_tables(self, schema: str = "") -> dict[str, TableInfo]:
+        db_schema = schema or "dbo"
+        tables: dict[str, TableInfo] = {}
+        cur = self.connection.cursor()
+
+        # 1. Tables and columns
+        cur.execute("""
+            SELECT c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE,
+                   c.COLUMN_DEFAULT, c.CHARACTER_MAXIMUM_LENGTH,
+                   COLUMNPROPERTY(OBJECT_ID(c.TABLE_SCHEMA + '.' + c.TABLE_NAME), c.COLUMN_NAME, 'IsIdentity') as is_identity
+            FROM INFORMATION_SCHEMA.COLUMNS c
+            JOIN INFORMATION_SCHEMA.TABLES t
+                ON c.TABLE_NAME = t.TABLE_NAME AND c.TABLE_SCHEMA = t.TABLE_SCHEMA
+            WHERE c.TABLE_SCHEMA = %s AND t.TABLE_TYPE = 'BASE TABLE'
+            ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION
+        """, (db_schema,))
+
+        for row in cur.fetchall():
+            table_name, col_name, data_type, nullable, default, max_len, is_identity = row
+            if table_name in SYSTEM_TABLES:
+                continue
+            if table_name not in tables:
+                tables[table_name] = TableInfo(name=table_name)
+
+            col = Column(
+                name=col_name, data_type=data_type,
+                nullable=nullable == "YES", has_default=default is not None,
+                is_serial=bool(is_identity), max_length=max_len,
+            )
+            tables[table_name].columns.append(col)
+
+        # 2. Primary keys
+        cur.execute("""
+            SELECT kcu.TABLE_NAME, kcu.COLUMN_NAME
+            FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+            JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+                ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+            WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' AND tc.TABLE_SCHEMA = %s
+        """, (db_schema,))
+        for table_name, col_name in cur.fetchall():
+            if table_name in tables:
+                for col in tables[table_name].columns:
+                    if col.name == col_name:
+                        col.is_primary = True
+
+        # 3. Foreign keys
+        cur.execute("""
+            SELECT
+                fk.TABLE_NAME, cu.COLUMN_NAME,
+                pk.TABLE_NAME AS referenced_table, pt.COLUMN_NAME AS referenced_column
+            FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+            JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS fk ON rc.CONSTRAINT_NAME = fk.CONSTRAINT_NAME
+            JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ON rc.UNIQUE_CONSTRAINT_NAME = pk.CONSTRAINT_NAME
+            JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE cu ON rc.CONSTRAINT_NAME = cu.CONSTRAINT_NAME
+            JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE pt ON rc.UNIQUE_CONSTRAINT_NAME = pt.CONSTRAINT_NAME
+            WHERE fk.TABLE_SCHEMA = %s
+        """, (db_schema,))
+        for table_name, col_name, fk_table, fk_column in cur.fetchall():
+            if table_name in tables:
+                for col in tables[table_name].columns:
+                    if col.name == col_name:
+                        col.fk_table = fk_table
+                        col.fk_column = fk_column
+
+        # 4. Unique constraints
+        cur.execute("""
+            SELECT kcu.TABLE_NAME, kcu.COLUMN_NAME
+            FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+            JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+                ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+            WHERE tc.CONSTRAINT_TYPE = 'UNIQUE' AND tc.TABLE_SCHEMA = %s
+        """, (db_schema,))
+        for table_name, col_name in cur.fetchall():
+            if table_name in tables:
+                for col in tables[table_name].columns:
+                    if col.name == col_name:
+                        col.is_unique = True
 
         cur.close()
         return tables
