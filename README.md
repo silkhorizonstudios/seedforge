@@ -158,13 +158,13 @@ seedforge ai-generate --rows 20
 seedforge ai-generate --provider ollama --rows 20
 ```
 
-| Provider | Models | Speed | Cost |
-|---|---|---|---|
-| **Anthropic** | Claude Haiku, Sonnet, Opus | Fast | $$ |
-| **OpenAI** | GPT-4o-mini, GPT-4o | Fast | $$ |
-| **Gemini** | Gemini 2.0 Flash | Fast | $ |
-| **Groq** | Llama 3.3 70B, Mixtral | Very fast | $ |
-| **Ollama** | Any local model | Varies | Free |
+| Provider | Speed | Cost |
+|---|---|---|
+| **Anthropic** | Fast | $$ |
+| **OpenAI** | Fast | $$ |
+| **Google Gemini** | Fast | $ |
+| **Groq** | Very fast | $ |
+| **Ollama** | Varies | Free |
 
 ## How It Works
 
@@ -245,10 +245,10 @@ exclude_tables:
 
 ## Supported AI Providers
 
-- [x] Anthropic (Claude)
-- [x] OpenAI (GPT-4o)
+- [x] Anthropic
+- [x] OpenAI
 - [x] Google Gemini
-- [x] Groq (Llama, Mixtral)
+- [x] Groq
 - [x] Ollama (local, free)
 
 ## Data Privacy
