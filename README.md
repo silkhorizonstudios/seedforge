@@ -6,6 +6,8 @@
 
 Database seeding tool. Connects to your DB, reads the schema, generates realistic data with valid foreign keys.
 
+![demo](demo.gif)
+
 ```bash
 pip install seedforge
 seedforge connect postgresql://user:pass@localhost/mydb
@@ -23,6 +25,7 @@ SeedForge reads your schema and figures out the rest. It knows that `orders.user
 ```bash
 pip install seedforge          # PostgreSQL + SQLite
 pip install seedforge[mysql]   # + MySQL/MariaDB
+pip install seedforge[mssql]   # + SQL Server
 pip install seedforge[ai]      # + AI providers
 pip install seedforge[all]     # everything
 ```
@@ -34,6 +37,7 @@ pip install seedforge[all]     # everything
 seedforge connect postgresql://user:pass@localhost:5432/mydb
 seedforge connect mysql://user:pass@localhost:3306/mydb
 seedforge connect sqlite:///path/to/db.sqlite
+seedforge connect mssql://sa:pass@localhost/mydb
 
 # see what's in the database
 seedforge inspect

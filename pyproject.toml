@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "seedforge"
-version = "0.4.0"
+version = "0.5.0"
 description = "One command to fill your database with realistic test data. Reads schema, resolves FK, generates smart data — no code needed."
 readme = "README.md"
 license = {text = "MIT"}
