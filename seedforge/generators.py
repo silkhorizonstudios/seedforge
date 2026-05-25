@@ -81,12 +81,22 @@ class DataGenerator:
         if col.nullable and random.random() < 0.05:
             return None
 
-        # JSON/JSONB columns always get JSON regardless of column name
-        if col.data_type.lower() in ("json", "jsonb"):
+        # Force correct generator for structured types regardless of column name
+        dtype = col.data_type.lower()
+        if dtype in ("json", "jsonb"):
             return self._call_generator("_random_json", col, row_index)
+        if "[]" in dtype or dtype == "array" or dtype.startswith("_"):
+            return self._call_generator("_empty_array", col, row_index)
 
         generator_name = match_generator(col.name, col.data_type, table_name)
-        return self._call_generator(generator_name, col, row_index)
+        value = self._call_generator(generator_name, col, row_index)
+
+        # Cast booleans to int for integer columns
+        int_types = ("integer", "bigint", "smallint", "int", "int2", "int4", "int8")
+        if isinstance(value, bool) and col.data_type.lower() in int_types:
+            value = 1 if value else 0
+
+        return value
 
     def _call_generator(self, name: str, col: Column, row_index: int) -> object:
         """Call generator by name."""
@@ -104,7 +114,7 @@ class DataGenerator:
             "_random_bigint": lambda: random.randint(1, 1_000_000),
             "_random_smallint": lambda: random.randint(1, 1000),
             "_random_float": lambda: round(random.uniform(0.01, 10000.0), 2),
-            "_random_decimal": lambda: Decimal(str(round(random.uniform(0.01, 10000.0), 2))),
+            "_random_decimal": lambda: Decimal(str(round(random.uniform(0.01, 999.99), 2))),
             "_random_bool": lambda: random.choice([True, False]),
             "_random_char": lambda: random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
 
@@ -123,7 +133,7 @@ class DataGenerator:
             "_random_interval": lambda: f"{random.randint(1, 365)} days",
 
             # Special
-            "_price": lambda: Decimal(str(round(random.uniform(1.0, 9999.99), 2))),
+            "_price": lambda: Decimal(str(round(random.uniform(1.0, 999.99), 2))),
             "_percentage": lambda: Decimal(str(round(random.uniform(0.0, 100.0), 1))),
             "_image_url": lambda: f"https://picsum.photos/seed/{random.randint(1, 10000)}/400/300",
             "_true_biased": lambda: random.random() < 0.85,
@@ -172,6 +182,7 @@ class DataGenerator:
             "_rating": lambda: round(random.uniform(1.0, 5.0), 1),
             "_sort_order": lambda: row_index + 1,
             "_capacity": lambda: random.choice([5, 10, 25, 50, 100, 250, 500, 1000]),
+            "_year": lambda: random.randint(1990, 2026),
             "_age": lambda: random.randint(18, 80),
             "_duration": lambda: random.randint(1, 480),
             "_dimension": lambda: random.randint(50, 4000),
@@ -183,9 +194,15 @@ class DataGenerator:
         }
 
         if name in custom:
-            return custom[name]()
+            value = custom[name]()
+            if isinstance(value, str) and col.max_length and len(value) > col.max_length:
+                value = value[:col.max_length]
+            return value
 
-        return self.faker.sentence()
+        value = self.faker.sentence()
+        if isinstance(value, str) and col.max_length and len(value) > col.max_length:
+            value = value[:col.max_length]
+        return value
 
     def _ensure_unique(self, table_name: str, col_name: str, col: Column, row_index: int) -> object:
         """Ensure value uniqueness."""

@@ -106,6 +106,14 @@ class PostgresIntrospector(Introspector):
         tables: dict[str, TableInfo] = {}
         cur = self.connection.cursor()
 
+        # Skip partitioned parent tables (relkind='p')
+        cur.execute("""
+            SELECT c.relname FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = %s AND c.relkind = 'p'
+        """, (schema,))
+        partitioned_tables = {row[0] for row in cur.fetchall()}
+
         # 1. Tables and columns
         cur.execute("""
             SELECT c.table_name, c.column_name, c.data_type, c.is_nullable,
@@ -119,7 +127,7 @@ class PostgresIntrospector(Introspector):
 
         for row in cur.fetchall():
             table_name, col_name, data_type, nullable, default, max_len, udt_name = row
-            if table_name in SYSTEM_TABLES:
+            if table_name in SYSTEM_TABLES or table_name in partitioned_tables:
                 continue
             if table_name not in tables:
                 tables[table_name] = TableInfo(name=table_name)

@@ -70,6 +70,7 @@ COLUMN_PATTERNS: list[tuple[list[str], str]] = [
     (["rating", "score", "grade"], "_rating"),
     (["sort_order", "position", "order", "rank", "weight", "sequence", "seq", "priority_order"], "_sort_order"),
     (["max_employees", "max_users", "max_items", "limit", "max", "capacity"], "_capacity"),
+    (["year", "release_year", "birth_year", "start_year", "end_year", "founded_year"], "_year"),
     (["age", "min_age", "max_age"], "_age"),
     (["duration", "length", "minutes", "hours", "days"], "_duration"),
     (["width", "height", "size"], "_dimension"),

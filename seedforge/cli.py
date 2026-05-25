@@ -145,20 +145,22 @@ def generate(
     generator = DataGenerator(seed=seed)
     generated_data = {}
 
-    for table_name in order:
-        table = all_tables[table_name]
-        with console.status(f"[blue]Generating {table_name}...[/blue]"):
-            data = generator.generate_table(table, rows, generated_data)
-            generated_data[table_name] = data
-        console.print(f"  [green]✓[/green] {table_name}: {len(data)} rows")
+    if export or dry_run:
+        # Generate all data first, then export/preview
+        for table_name in order:
+            table = all_tables[table_name]
+            with console.status(f"[blue]Generating {table_name}...[/blue]"):
+                data = generator.generate_table(table, rows, generated_data)
+                generated_data[table_name] = data
+            console.print(f"  [green]✓[/green] {table_name}: {len(data)} rows")
 
-    # Export or insert
-    if export:
-        _export_data(export, generated_data, all_tables, order)
-    elif dry_run:
-        console.print(f"\n[yellow]Dry run — no data inserted.[/yellow]")
-        _show_preview(generated_data, order)
+        if export:
+            _export_data(export, generated_data, all_tables, order)
+        else:
+            console.print(f"\n[yellow]Dry run — no data inserted.[/yellow]")
+            _show_preview(generated_data, order)
     else:
+        # Generate + insert per table so FK references use real DB IDs
         engine = introspector.get_db_info().get("engine", "PostgreSQL")
         inserter = BatchInserter(introspector.connection, engine=engine)
         if clean:
@@ -166,9 +168,37 @@ def generate(
                 inserter.truncate_tables(order)
             console.print("[yellow]Tables truncated.[/yellow]\n")
 
-        with console.status("[bold blue]Inserting data...[/bold blue]"):
-            inserter.insert_all(generated_data, all_tables, order)
-        console.print(f"\n[bold green]Done![/bold green] Inserted {sum(len(d) for d in generated_data.values())} rows into {len(order)} tables.\n")
+        total_inserted = 0
+        try:
+            for table_name in order:
+                table = all_tables[table_name]
+                data = generator.generate_table(table, rows, generated_data)
+                generated_data[table_name] = data
+
+                if data:
+                    inserter.insert_table(table_name, data, all_tables)
+                    # Read back real PKs for FK resolution in child tables
+                    pk_cols = [c for c in table.columns if c.is_primary]
+                    if pk_cols and not inserter._is_sqlite:
+                        pk_name = pk_cols[0].name
+                        q = inserter._q
+                        cur = introspector.connection.cursor()
+                        cur.execute(f'SELECT {q}{pk_name}{q} FROM {q}{table_name}{q}')
+                        real_ids = [row[0] for row in cur.fetchall()]
+                        cur.close()
+                        if real_ids:
+                            generated_data[table_name] = [{pk_name: rid} for rid in real_ids]
+
+                    total_inserted += len(data)
+                console.print(f"  [green]✓[/green] {table_name}: {len(data)} rows")
+
+            introspector.connection.commit()
+            console.print(f"\n[bold green]Done![/bold green] Inserted {total_inserted} rows into {len(order)} tables.\n")
+        except Exception as e:
+            introspector.connection.rollback()
+            console.print(f"\n[bold red]Insert failed:[/bold red] {e}")
+            console.print("[dim]Transaction rolled back, no data was written.[/dim]")
+            raise typer.Exit(1)
 
     introspector.close()
 
