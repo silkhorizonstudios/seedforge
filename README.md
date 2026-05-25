@@ -150,12 +150,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 export OPENAI_API_KEY=sk-...
 export GEMINI_API_KEY=AIza...
 export GROQ_API_KEY=gsk_...
-export OLLAMA_MODEL=llama3.2      # Local, free
 
 seedforge ai-generate --rows 20
-
-# Explicit provider
-seedforge ai-generate --provider ollama --rows 20
 ```
 
 | Provider | Speed | Cost |
@@ -164,7 +160,6 @@ seedforge ai-generate --provider ollama --rows 20
 | **OpenAI** | Fast | $$ |
 | **Google Gemini** | Fast | $ |
 | **Groq** | Very fast | $ |
-| **Ollama** | Varies | Free |
 
 ## How It Works
 
@@ -249,7 +244,6 @@ exclude_tables:
 - [x] OpenAI
 - [x] Google Gemini
 - [x] Groq
-- [x] Ollama (local, free)
 
 ## Data Privacy
 

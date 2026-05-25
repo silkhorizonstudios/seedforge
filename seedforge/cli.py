@@ -179,12 +179,12 @@ def ai_generate(
     rows: int = typer.Option(20, "--rows", "-r", help="Rows per table (max 50 for AI)"),
     schema: str = typer.Option("public", help="Database schema"),
     api_key: Optional[str] = typer.Option(None, "--api-key", "-k", help="API key (auto-detects provider by prefix)"),
-    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="AI provider: anthropic, openai, gemini, groq, ollama"),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="AI provider: anthropic, openai, gemini, groq"),
     export: Optional[str] = typer.Option(None, "--export", "-e", help="Export to file (sql/json)"),
 ):
     """Generate data using AI for maximum realism.
 
-    Supports: Anthropic, OpenAI, Gemini, Groq, Ollama.
+    Supports: Anthropic, OpenAI, Gemini, Groq.
     Auto-detects provider by API key prefix or env variable.
     """
     from seedforge.ai import generate_with_ai, detect_provider, list_providers

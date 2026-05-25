@@ -96,36 +96,12 @@ class GroqProvider:
         return response.choices[0].message.content
 
 
-class OllamaProvider:
-    name = "Ollama (local)"
-    env_key = "OLLAMA_MODEL"
-
-    def __init__(self, model: str = "llama3.2", host: str = "http://localhost:11434"):
-        self.model = model
-        self.host = host
-
-    def generate(self, prompt: str, max_tokens: int = 8192) -> str:
-        import urllib.request
-        url = f"{self.host}/api/generate"
-        payload = json.dumps({
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"num_predict": max_tokens},
-        }).encode()
-        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read())
-        return data["response"]
-
-
 # Реестр провайдеров: ключ → (класс, env_var)
 PROVIDERS = {
     "anthropic": AnthropicProvider,
     "openai": OpenAIProvider,
     "gemini": GeminiProvider,
     "groq": GroqProvider,
-    "ollama": OllamaProvider,
 }
 
 
@@ -135,9 +111,6 @@ def detect_provider(api_key: str | None = None, provider: str | None = None) -> 
     if provider and provider in PROVIDERS:
         cls = PROVIDERS[provider]
         key = api_key or os.environ.get(cls.env_key, "")
-        if provider == "ollama":
-            model = key or os.environ.get("OLLAMA_MODEL", "llama3.2")
-            return OllamaProvider(model=model)
         if key:
             return cls(api_key=key)
         return None
@@ -163,10 +136,6 @@ def detect_provider(api_key: str | None = None, provider: str | None = None) -> 
         key = os.environ.get(env_key)
         if key:
             return cls(api_key=key)
-
-    # Ollama — если запущен локально
-    if os.environ.get("OLLAMA_MODEL"):
-        return OllamaProvider(model=os.environ["OLLAMA_MODEL"])
 
     return None
 
