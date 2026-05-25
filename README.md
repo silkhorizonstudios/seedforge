@@ -48,16 +48,6 @@ But in practice:
 
 **Correctness.** AI sometimes forgets a foreign key, generates a duplicate for a UNIQUE column, or invents an ENUM value that doesn't exist. SeedForge reads the actual constraints from your database — it physically can't violate them.
 
-**Cost at scale.** A team of 5 developers, each resetting their local DB 3 times a day:
-
-| | AI API | SeedForge |
-|---|---|---|
-| Per run | ~$0.50 | $0 |
-| Per day (team) | $7.50 | $0 |
-| Per month | **$225** | **$0** |
-
-SeedForge uses AI as an optional enhancement for complex data (product descriptions, realistic bios) — not as the engine for every INSERT.
-
 ## Installation
 
 ```bash
