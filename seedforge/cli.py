@@ -9,14 +9,14 @@ from typing import Optional
 from pathlib import Path
 
 from seedforge.config import Config, DEFAULT_CONFIG_FILE
-from seedforge.introspector import Introspector
+from seedforge.introspector import create_introspector
 from seedforge.graph import DependencyGraph
 from seedforge.generators import DataGenerator
 from seedforge.inserter import BatchInserter
 
 app = typer.Typer(
     name="seedforge",
-    help="AI-powered test data generator. Reads your DB schema, generates realistic FK-valid data.",
+    help="One command to fill your database with realistic test data.",
     no_args_is_help=True,
 )
 console = Console()
@@ -31,7 +31,7 @@ def connect(
     console.print(f"\n[bold blue]Connecting to database...[/bold blue]")
 
     try:
-        introspector = Introspector(db_url)
+        introspector = create_introspector(db_url)
         info = introspector.get_db_info()
         introspector.close()
 
@@ -58,7 +58,7 @@ def inspect(
     """Inspect database schema: tables, columns, foreign keys."""
     db_url = _resolve_db_url(db_url)
 
-    introspector = Introspector(db_url)
+    introspector = create_introspector(db_url)
     tables = introspector.get_tables(schema)
     introspector.close()
 
@@ -109,7 +109,7 @@ def generate(
     db_url = _resolve_db_url(db_url)
 
     with console.status("[bold blue]Reading schema...[/bold blue]"):
-        introspector = Introspector(db_url)
+        introspector = create_introspector(db_url)
         all_tables = introspector.get_tables(schema)
 
     if not all_tables:
@@ -159,7 +159,8 @@ def generate(
         console.print(f"\n[yellow]Dry run — no data inserted.[/yellow]")
         _show_preview(generated_data, order)
     else:
-        inserter = BatchInserter(introspector.connection)
+        engine = introspector.get_db_info().get("engine", "PostgreSQL")
+        inserter = BatchInserter(introspector.connection, engine=engine)
         if clean:
             with console.status("[yellow]Cleaning tables...[/yellow]"):
                 inserter.truncate_tables(order)
@@ -168,6 +169,79 @@ def generate(
         with console.status("[bold blue]Inserting data...[/bold blue]"):
             inserter.insert_all(generated_data, all_tables, order)
         console.print(f"\n[bold green]Done![/bold green] Inserted {sum(len(d) for d in generated_data.values())} rows into {len(order)} tables.\n")
+
+    introspector.close()
+
+
+@app.command()
+def ai_generate(
+    db_url: Optional[str] = typer.Argument(None, help="Database connection string"),
+    rows: int = typer.Option(20, "--rows", "-r", help="Rows per table (max 50 for AI)"),
+    schema: str = typer.Option("public", help="Database schema"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", help="API key (auto-detects provider by prefix)"),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="AI provider: anthropic, openai, gemini, groq, ollama"),
+    export: Optional[str] = typer.Option(None, "--export", "-e", help="Export to file (sql/json)"),
+):
+    """Generate data using AI for maximum realism.
+
+    Supports: Anthropic, OpenAI, Gemini, Groq, Ollama.
+    Auto-detects provider by API key prefix or env variable.
+    """
+    from seedforge.ai import generate_with_ai, detect_provider, list_providers
+
+    ai = detect_provider(api_key, provider)
+    if not ai:
+        console.print("[red]No AI provider found.[/red]\n")
+        console.print("Set one of these environment variables:")
+        for p in list_providers():
+            status = "[green]✓[/green]" if p["available"] else "[dim]–[/dim]"
+            console.print(f"  {status} {p['env']:25s} {p['display']}")
+        console.print(f"\nOr pass --api-key directly.")
+        raise typer.Exit(1)
+
+    console.print(f"[dim]Provider: {ai.name}[/dim]")
+
+    db_url = _resolve_db_url(db_url)
+    rows = min(rows, 50)
+
+    with console.status("[bold blue]Reading schema...[/bold blue]"):
+        introspector = create_introspector(db_url)
+        all_tables = introspector.get_tables(schema)
+
+    if not all_tables:
+        console.print("[yellow]No tables found.[/yellow]")
+        introspector.close()
+        raise typer.Exit(0)
+
+    from seedforge.graph import DependencyGraph
+    graph = DependencyGraph(all_tables)
+    order = graph.topological_sort()
+
+    console.print(f"\n[bold]AI generating {rows} rows for {len(order)} tables[/bold]\n")
+
+    generated_data = {}
+    for table_name in order:
+        table = all_tables[table_name]
+        columns = [
+            {"name": c.name, "type": c.data_type, "nullable": c.nullable}
+            for c in table.columns
+            if not (c.is_primary and c.is_serial)
+        ]
+
+        with console.status(f"[blue]AI generating {table_name}...[/blue]"):
+            data = generate_with_ai(table_name, columns, rows, ai_provider=ai)
+
+        if data:
+            generated_data[table_name] = data
+            console.print(f"  [green]✓[/green] {table_name}: {len(data)} rows (AI)")
+        else:
+            console.print(f"  [yellow]⚠[/yellow] {table_name}: AI failed, skipping")
+
+    if export:
+        _export_data(export, generated_data, all_tables, order)
+    else:
+        console.print(f"\n[bold green]Done![/bold green] Generated {sum(len(d) for d in generated_data.values())} rows.")
+        _show_preview(generated_data, order)
 
     introspector.close()
 

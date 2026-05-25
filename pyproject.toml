@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "seedforge"
-version = "0.1.0"
-description = "AI-powered test data generator that reads your database schema and fills it with realistic, FK-valid data in seconds"
+version = "0.3.2"
+description = "One command to fill your database with realistic test data. Reads schema, resolves FK, generates smart data — no code needed."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -33,13 +33,22 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.optional-dependencies]
+mysql = ["pymysql>=1.1.0"]
+anthropic = ["anthropic>=0.40.0"]
+openai = ["openai>=1.0.0"]
+groq = ["groq>=0.4.0"]
+ai = ["anthropic>=0.40.0", "openai>=1.0.0"]
+all = ["pymysql>=1.1.0", "anthropic>=0.40.0", "openai>=1.0.0"]
+
 [project.scripts]
 seedforge = "seedforge.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/silkhorizon/seedforge"
-Documentation = "https://seedforge.dev"
-Repository = "https://github.com/silkhorizon/seedforge"
+Homepage = "https://github.com/silkhorizonstudios/seedforge"
+Repository = "https://github.com/silkhorizonstudios/seedforge"
+"Bug Tracker" = "https://github.com/silkhorizonstudios/seedforge/issues"
+PyPI = "https://pypi.org/project/seedforge/"
 
 [tool.setuptools.packages.find]
 include = ["seedforge*"]
