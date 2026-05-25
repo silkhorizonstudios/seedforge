@@ -81,6 +81,10 @@ class DataGenerator:
         if col.nullable and random.random() < 0.05:
             return None
 
+        # JSON/JSONB columns always get JSON regardless of column name
+        if col.data_type.lower() in ("json", "jsonb"):
+            return self._call_generator("_random_json", col, row_index)
+
         generator_name = match_generator(col.name, col.data_type, table_name)
         return self._call_generator(generator_name, col, row_index)
 
